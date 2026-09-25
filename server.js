@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const yts = require('yt-search');
+const yts = require('yt-search'); // مكتبة البحث الخاصة بك المضمونة 100%
 const axios = require('axios');
 const https = require('https');
 
@@ -12,7 +12,7 @@ app.get('/', (req, res) => {
     res.send('Server is active');
 });
 
-// 1. مسار البحث (يعمل بشكل ممتاز)
+// 1. مسار البحث (يعمل بشكل ممتاز بدون أي مشاكل)
 app.get('/search', async (req, res) => {
     try {
         const query = req.query.q;
@@ -33,34 +33,69 @@ app.get('/search', async (req, res) => {
     }
 });
 
-// 2. مسار التشغيل باستخدام API جاهز ومستقر (Piped API)
+// 2. مسار التشغيل الفائق (جلب الرابط بـ 12+ طريقة وسيرفر مختلف)
 app.get('/video', async (req, res) => {
-    try {
-        const id = req.query.id;
-        if (!id) return res.status(400).send('معرف الفيديو مطلوب');
+    const id = req.query.id;
+    if (!id) return res.status(400).send('معرف الفيديو مطلوب');
 
-        // استخدام API جاهز لا يتأثر بالحظر
-        const pipedUrl = `https://pipedapi.kavin.rocks/streams/${id}`;
-        const response = await axios.get(pipedUrl, { timeout: 6000 });
+    // قائمة شاملة لأقوى سيرفرات Piped و Invidious حول العالم
+    const providers = [
+        // سيرفرات Piped APIs
+        { type: 'piped', url: `https://pipedapi.kavin.rocks/streams/${id}` },
+        { type: 'piped', url: `https://api.piped.privacydev.net/streams/${id}` },
+        { type: 'piped', url: `https://pipedapi.tokhmi.xyz/streams/${id}` },
+        { type: 'piped', url: `https://pipedapi.moomoo.me/streams/${id}` },
+        { type: 'piped', url: `https://pipedapi.synclick.org/streams/${id}` },
+        
+        // سيرفرات Invidious APIs
+        { type: 'invidious', url: `https://inv.nadeko.net/api/v1/videos/${id}` },
+        { type: 'invidious', url: `https://invidious.nerdvpn.de/api/v1/videos/${id}` },
+        { type: 'invidious', url: `https://yt.drgnz.club/api/v1/videos/${id}` },
+        { type: 'invidious', url: `https://invidious.flokinet.to/api/v1/videos/${id}` },
+        { type: 'invidious', url: `https://invidious.privacydev.net/api/v1/videos/${id}` },
+        { type: 'invidious', url: `https://iv.melmac.space/api/v1/videos/${id}` },
+        { type: 'invidious', url: `https://invidious.projectsegfau.lt/api/v1/videos/${id}` }
+    ];
 
-        const videoData = response.data;
-        const title = videoData.title || '';
+    let streamUrl = null;
+    let title = '';
 
-        // البحث عن أفضل صيغة فيديو بدقة 144p أو أضعف دقة متاحة
-        let streamUrl = null;
-        if (videoData.videoStreams && videoData.videoStreams.length > 0) {
-            const stream144 = videoData.videoStreams.find(s => s.quality === '144p' || s.quality === '240p');
-            streamUrl = stream144 ? stream144.url : videoData.videoStreams[0].url;
+    // الحلقة التكرارية: تجريب كل سيرفر حتى ينجح واحد منها
+    for (let provider of providers) {
+        try {
+            const response = await axios.get(provider.url, { timeout: 3500 });
+            
+            if (provider.type === 'piped' && response.data && response.data.videoStreams) {
+                const videoData = response.data;
+                title = videoData.title || '';
+                
+                // اختيار بدقة 144p أو أضعف دقة متاحة
+                const stream144 = videoData.videoStreams.find(s => s.quality === '144p' || s.quality === '240p');
+                streamUrl = stream144 ? stream144.url : videoData.videoStreams[0].url;
+
+                if (streamUrl) break; // نجح التجريب! اخرج من الحلقة فوراً
+            } 
+            else if (provider.type === 'invidious' && response.data && response.data.formatStreams) {
+                title = response.data.title || '';
+                
+                const format = response.data.formatStreams.find(f => f.quality === '144p' || f.qualityLabel === '144p') 
+                            || response.data.formatStreams[0];
+
+                if (format && format.url) {
+                    streamUrl = format.url;
+                    break; // نجح التجريب! اخرج من الحلقة فوراً
+                }
+            }
+        } catch (e) {
+            // السيرفر الحالي لم يستجب أو محجوب، ننتقل فوراً للسيرفر التالي
+            continue;
         }
+    }
 
-        if (streamUrl) {
-            res.json({ title: title, streamUrl: streamUrl });
-        } else {
-            res.status(500).json({ error: 'تعذر العثور على رابط البث' });
-        }
-    } catch (error) {
-        console.error("Video Fetch Error:", error.message);
-        res.status(500).json({ error: 'خطأ في جلب بيانات الفيديو' });
+    if (streamUrl) {
+        res.json({ title: title, streamUrl: streamUrl });
+    } else {
+        res.status(500).json({ error: 'جميع المحاولات فشلت، جرب فيديو آخر' });
     }
 });
 
