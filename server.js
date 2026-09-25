@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const yts = require('yt-search'); // مكتبة البحث كما هي بدون تغيير
+const yts = require('yt-search');
 const axios = require('axios');
 const https = require('https');
 
@@ -12,7 +12,7 @@ app.get('/', (req, res) => {
     res.send('Server is active');
 });
 
-// 1. مسار البحث (بقي كما هو تماماً ليعمل بنفس الكفاءة)
+// 1. مسار البحث (يعمل بشكل ممتاز)
 app.get('/search', async (req, res) => {
     try {
         const query = req.query.q;
@@ -33,45 +33,34 @@ app.get('/search', async (req, res) => {
     }
 });
 
-// 2. مسار التشغيل الجديد (يجلب رابط 144p المباشر بالـ id)
+// 2. مسار التشغيل باستخدام API جاهز ومستقر (Piped API)
 app.get('/video', async (req, res) => {
     try {
         const id = req.query.id;
         if (!id) return res.status(400).send('معرف الفيديو مطلوب');
 
-        const instances = [
-            'https://inv.nadeko.net',
-            'https://invidious.nerdvpn.de',
-            'https://yt.drgnz.club'
-        ];
+        // استخدام API جاهز لا يتأثر بالحظر
+        const pipedUrl = `https://pipedapi.kavin.rocks/streams/${id}`;
+        const response = await axios.get(pipedUrl, { timeout: 6000 });
 
+        const videoData = response.data;
+        const title = videoData.title || '';
+
+        // البحث عن أفضل صيغة فيديو بدقة 144p أو أضعف دقة متاحة
         let streamUrl = null;
-        let title = '';
-
-        for (let inst of instances) {
-            try {
-                const response = await axios.get(`${inst}/api/v1/videos/${id}`, { timeout: 4000 });
-                title = response.data.title;
-                
-                const format = response.data.formatStreams.find(f => f.quality === '144p' || f.qualityLabel === '144p') 
-                            || response.data.formatStreams[0];
-
-                if (format && format.url) {
-                    streamUrl = format.url;
-                    break;
-                }
-            } catch (e) {
-                continue;
-            }
+        if (videoData.videoStreams && videoData.videoStreams.length > 0) {
+            const stream144 = videoData.videoStreams.find(s => s.quality === '144p' || s.quality === '240p');
+            streamUrl = stream144 ? stream144.url : videoData.videoStreams[0].url;
         }
 
         if (streamUrl) {
             res.json({ title: title, streamUrl: streamUrl });
         } else {
-            res.status(500).json({ error: 'تعذر جلب رابط الفيديو' });
+            res.status(500).json({ error: 'تعذر العثور على رابط البث' });
         }
     } catch (error) {
-        res.status(500).json({ error: 'خطأ في الاتصال' });
+        console.error("Video Fetch Error:", error.message);
+        res.status(500).json({ error: 'خطأ في جلب بيانات الفيديو' });
     }
 });
 
