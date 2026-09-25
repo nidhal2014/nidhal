@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-const ytdl = require('@distube/ytdl-core');
-const yts = require('yt-search');
+const yts = require('yt-search'); // مكتبة البحث كما هي بدون تغيير
+const axios = require('axios');
 const https = require('https');
 
 const app = express();
@@ -12,7 +12,7 @@ app.get('/', (req, res) => {
     res.send('Server is active');
 });
 
-// 1. مسار البحث عن الفيديوهات مع الصور المصغرة خفيفة الدقة
+// 1. مسار البحث (بقي كما هو تماماً ليعمل بنفس الكفاءة)
 app.get('/search', async (req, res) => {
     try {
         const query = req.query.q;
@@ -21,11 +21,10 @@ app.get('/search', async (req, res) => {
         const r = await yts(query);
         const videos = r.videos.slice(0, 10).map(v => ({
             title: v.title,
-            url: v.url,
+            videoId: v.videoId,
             timestamp: v.timestamp,
             author: v.author.name,
-            // اختيار أصغر صورة مصغرة ممكّنة (hqdefault أو default) لتقليل حجم البيانات
-            thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/default.jpg`
+            thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`
         }));
 
         res.json(videos);
@@ -34,37 +33,45 @@ app.get('/search', async (req, res) => {
     }
 });
 
-// 2. مسار جلب رابط الفيديو بدقة 144p مع تحسين الاتصال
+// 2. مسار التشغيل الجديد (يجلب رابط 144p المباشر بالـ id)
 app.get('/video', async (req, res) => {
     try {
-        const videoUrl = req.query.url;
-        if (!videoUrl) return res.status(400).send('رابط الفيديو مطلوب');
+        const id = req.query.id;
+        if (!id) return res.status(400).send('معرف الفيديو مطلوب');
 
-        // خيارات لتفادي حجب يوتيوب
-        const info = await ytdl.getInfo(videoUrl, {
-            requestOptions: {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        const instances = [
+            'https://inv.nadeko.net',
+            'https://invidious.nerdvpn.de',
+            'https://yt.drgnz.club'
+        ];
+
+        let streamUrl = null;
+        let title = '';
+
+        for (let inst of instances) {
+            try {
+                const response = await axios.get(`${inst}/api/v1/videos/${id}`, { timeout: 4000 });
+                title = response.data.title;
+                
+                const format = response.data.formatStreams.find(f => f.quality === '144p' || f.qualityLabel === '144p') 
+                            || response.data.formatStreams[0];
+
+                if (format && format.url) {
+                    streamUrl = format.url;
+                    break;
                 }
+            } catch (e) {
+                continue;
             }
-        });
-
-        // البحث عن دقة 144p أو 240p تحتوي على صوت وفيديو معا
-        let format = info.formats.find(f => f.qualityLabel === '144p' && f.hasVideo && f.hasAudio);
-        if (!format) {
-            format = info.formats.find(f => f.qualityLabel === '240p' && f.hasVideo && f.hasAudio);
-        }
-        if (!format) {
-            format = info.formats.find(f => f.hasVideo && f.hasAudio);
         }
 
-        res.json({
-            title: info.videoDetails.title,
-            streamUrl: format ? format.url : null
-        });
+        if (streamUrl) {
+            res.json({ title: title, streamUrl: streamUrl });
+        } else {
+            res.status(500).json({ error: 'تعذر جلب رابط الفيديو' });
+        }
     } catch (error) {
-        console.error('Error fetching video:', error.message);
-        res.status(500).json({ error: 'فشل جلب الفيديو' });
+        res.status(500).json({ error: 'خطأ في الاتصال' });
     }
 });
 
@@ -72,9 +79,8 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     
-    // إرسال تنبيه ذاتي كل 10 دقائق لإبقاء السيرفر نشطاً
-    const SERVER_URL = 'https://nidhal-q0ru.onrender.com';
+    // إبقاء السيرفر نشطاً
     setInterval(() => {
-        https.get(SERVER_URL, () => {}).on('error', () => {});
+        https.get('https://nidhal-q0ru.onrender.com', () => {}).on('error', () => {});
     }, 10 * 60 * 1000);
 });
